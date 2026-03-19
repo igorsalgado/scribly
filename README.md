@@ -80,9 +80,10 @@ LIVE_TRANSCRIPTION_CHUNK_SECONDS=5
 No Hugging Face:
 
 - crie um token com permissao de leitura
+- acesse: [Hugging Face](https://huggingface.co/)
 - aceite os termos de uso de:
-  - `pyannote/speaker-diarization-3.1`
-  - `pyannote/segmentation-3.0`
+  - [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+  - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
 
 ### 2. Build da imagem do worker
 
