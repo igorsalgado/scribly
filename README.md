@@ -35,11 +35,16 @@ scribly/
 
 ## Dependencias do host
 
-A UI roda fora do container, entao as dependencias Python precisam estar instaladas na maquina host:
+A UI roda fora do container, entao as dependencias Python do host devem ser instaladas separadamente:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.host.txt
 ```
+
+Observacoes:
+
+- `requirements.host.txt` cobre a UI desktop, launcher e integracao com Redis
+- `requirements.txt` fica reservado para o worker e para ambientes Python 3.11 compativeis com a stack completa de ML
 
 ## Configuracao
 
@@ -169,7 +174,7 @@ Se voce ja tiver um arquivo `.wav`, pode reprocessar sem abrir a UI:
 make process FILE=output/reuniao_20260318_143000.wav
 ```
 
-Ou diretamente:
+Ou diretamente, se o host tambem tiver a stack completa do worker instalada:
 
 ```bash
 python main.py --file output/reuniao_20260318_143000.wav

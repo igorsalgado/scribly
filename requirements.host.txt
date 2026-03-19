@@ -1,0 +1,8 @@
+# Host-side dependencies used by the desktop UI and launcher.
+sounddevice
+numpy
+python-dotenv
+rich
+arq
+redis
+customtkinter

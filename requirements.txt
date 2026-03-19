@@ -1,12 +1,13 @@
 # Audio capture
 sounddevice
-numpy
+numpy<2
 
 # Transcription (offline)
 faster-whisper
 
 # Speaker diarization (offline, requires HF token for model download only)
 pyannote.audio==3.3.2
+huggingface_hub<1.0
 # CPU-only torch — much smaller than the default GPU build
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.2.2+cpu
@@ -21,7 +22,7 @@ rich
 
 # ARQ worker + Redis
 arq
-redis[asyncio]
+redis
 
 # UI
 customtkinter
