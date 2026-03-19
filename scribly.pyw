@@ -2,6 +2,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ui.app import main
+
 ROOT = Path(__file__).resolve().parent
 
 subprocess.Popen(
@@ -12,7 +14,5 @@ subprocess.Popen(
 )
 
 sys.path.insert(0, str(ROOT))
-
-from ui.app import main
 
 main()
