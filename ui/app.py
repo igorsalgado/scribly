@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import queue
 import threading
+from concurrent.futures import Future
+from contextlib import suppress
 from enum import Enum, auto
 
 import customtkinter as ctk
@@ -13,6 +15,7 @@ from settings import (
     REDIS_PROGRESS_CHANNEL,
     REDIS_SETTINGS,
     REDIS_URL,
+    to_project_path,
 )
 
 PROGRESS_LABELS: dict[str, str] = {
@@ -57,8 +60,14 @@ class ScriblyApp(ctk.CTk):
         self._blink_on = True
         self._blink_job = None
         self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._async_thread: threading.Thread | None = None
+        self._progress_future: Future | None = None
+        self._progress_client = None
+        self._progress_pubsub = None
+        self._closing = False
 
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._start_async_bridge()
         self._poll_ui_queue()
 
@@ -179,20 +188,27 @@ class ScriblyApp(ctk.CTk):
 
     def _start_async_bridge(self) -> None:
         self._async_loop = asyncio.new_event_loop()
-        thread = threading.Thread(
+        self._async_thread = threading.Thread(
             target=self._async_loop.run_forever,
             daemon=True,
             name="async-bridge",
         )
-        thread.start()
-        asyncio.run_coroutine_threadsafe(self._subscribe_progress(), self._async_loop)
+        self._async_thread.start()
+        self._progress_future = asyncio.run_coroutine_threadsafe(
+            self._subscribe_progress(),
+            self._async_loop,
+        )
 
     async def _subscribe_progress(self) -> None:
         import redis.asyncio as aioredis
 
+        client = None
+        pubsub = None
         try:
             client = aioredis.from_url(REDIS_URL)
             pubsub = client.pubsub()
+            self._progress_client = client
+            self._progress_pubsub = pubsub
             await pubsub.subscribe(REDIS_PROGRESS_CHANNEL)
             async for message in pubsub.listen():
                 if message["type"] != "message":
@@ -201,8 +217,22 @@ class ScriblyApp(ctk.CTk):
                 if isinstance(stage, bytes):
                     stage = stage.decode()
                 self._ui_queue.put(("progress", stage))
+        except asyncio.CancelledError:
+            pass
         except Exception as exc:
-            self._ui_queue.put(("error", f"falha ao ouvir progresso: {exc}"))
+            if not self._closing:
+                self._ui_queue.put(("error", f"falha ao ouvir progresso: {exc}"))
+        finally:
+            if pubsub is not None:
+                with suppress(Exception):
+                    await pubsub.unsubscribe(REDIS_PROGRESS_CHANNEL)
+                with suppress(Exception):
+                    await pubsub.aclose()
+            if client is not None:
+                with suppress(Exception):
+                    await client.aclose(close_connection_pool=True)
+            self._progress_pubsub = None
+            self._progress_client = None
 
     def _poll_ui_queue(self) -> None:
         try:
@@ -219,7 +249,8 @@ class ScriblyApp(ctk.CTk):
         except queue.Empty:
             pass
 
-        self.after(50, self._poll_ui_queue)
+        if not self._closing:
+            self.after(50, self._poll_ui_queue)
 
     def _on_play(self) -> None:
         if self._state == AppState.IDLE:
@@ -267,7 +298,11 @@ class ScriblyApp(ctk.CTk):
         try:
             pool = await create_pool(REDIS_SETTINGS)
             try:
-                job = await pool.enqueue_job("process_meeting", wav_path, duration)
+                job = await pool.enqueue_job(
+                    "process_meeting",
+                    to_project_path(wav_path),
+                    duration,
+                )
                 if job is None:
                     raise RuntimeError("worker indisponivel para processar a reuniao")
             finally:
@@ -370,6 +405,48 @@ class ScriblyApp(ctk.CTk):
             self._transcript_box.insert("end", text)
         self._transcript_box.see("end")
         self._transcript_box.configure(state="disabled")
+
+    def _on_close(self) -> None:
+        self._closing = True
+
+        if self._timer_job is not None:
+            self.after_cancel(self._timer_job)
+            self._timer_job = None
+        if self._blink_job is not None:
+            self.after_cancel(self._blink_job)
+            self._blink_job = None
+
+        if self._async_loop is not None and self._async_loop.is_running():
+            shutdown_future = asyncio.run_coroutine_threadsafe(
+                self._shutdown_progress_subscription(),
+                self._async_loop,
+            )
+            with suppress(Exception):
+                shutdown_future.result(timeout=2)
+        if self._progress_future is not None:
+            with suppress(Exception):
+                self._progress_future.result(timeout=2)
+            self._progress_future = None
+
+        if self._async_loop is not None and self._async_loop.is_running():
+            self._async_loop.call_soon_threadsafe(self._async_loop.stop)
+        if self._async_thread is not None and self._async_thread.is_alive():
+            self._async_thread.join(timeout=2)
+        if self._async_loop is not None and not self._async_loop.is_closed():
+            self._async_loop.close()
+            self._async_loop = None
+
+        self.destroy()
+
+    async def _shutdown_progress_subscription(self) -> None:
+        if self._progress_pubsub is not None:
+            with suppress(Exception):
+                await self._progress_pubsub.unsubscribe(REDIS_PROGRESS_CHANNEL)
+            with suppress(Exception):
+                await self._progress_pubsub.aclose()
+        if self._progress_client is not None:
+            with suppress(Exception):
+                await self._progress_client.aclose(close_connection_pool=True)
 
 
 def main() -> None:

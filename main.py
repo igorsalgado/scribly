@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from application.meeting_markdown import write_meeting_markdown
 from rich.console import Console
 from rich.panel import Panel
 
 from application.reprocess_meeting import ReprocessMeetingUseCase
-from settings import APP_NAME, OUTPUT_DIR, create_pipeline, create_repository
+from settings import APP_NAME, create_pipeline, create_repository
 
 console = Console()
 
@@ -30,17 +31,8 @@ def _show_results(meeting) -> None:
             )
         )
 
-    if meeting.transcript and meeting.business_rules:
-        ts = meeting.date.strftime("%Y%m%d_%H%M%S")
-        output_md = OUTPUT_DIR / f"reuniao_{ts}.md"
-        output_md.write_text(
-            (
-                "# Transcript Diarizado\n\n"
-                f"{meeting.transcript.diarized_text}\n\n---\n\n"
-                f"{meeting.business_rules.raw_markdown}\n"
-            ),
-            encoding="utf-8",
-        )
+    output_md = write_meeting_markdown(meeting)
+    if output_md is not None:
         console.print(f"\n[dim]Salvo em [bold]{output_md}[/bold][/dim]")
 
 

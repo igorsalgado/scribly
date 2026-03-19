@@ -7,7 +7,7 @@ from pathlib import Path
 from application.pipeline import ProcessingContext, ProcessingHandler
 from domain.meeting import Meeting, Participant
 from domain.repositories import MeetingRepository
-from settings import MEETING_DATE_FORMAT
+from settings import MEETING_DATE_FORMAT, to_project_path
 
 
 def _wav_duration(wav_path: Path) -> float:
@@ -32,14 +32,16 @@ class ReprocessMeetingUseCase:
         self._pipeline.handle(context)
 
         meeting = Meeting.create(
-            audio_path=str(wav_path),
+            audio_path=to_project_path(wav_path),
             duration_seconds=_wav_duration(wav_path),
         )
         if context.transcript:
             meeting.transcript = context.transcript
             meeting.participants = [
                 Participant(label=speaker)
-                for speaker in dict.fromkeys(segment.speaker for segment in context.segments)
+                for speaker in dict.fromkeys(
+                    segment.speaker for segment in context.segments
+                )
             ]
         if context.business_rules:
             meeting.business_rules = context.business_rules

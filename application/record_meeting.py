@@ -9,7 +9,12 @@ from application.pipeline import ProcessingContext, ProcessingHandler
 from domain.meeting import Meeting, Participant
 from domain.repositories import MeetingRepository
 from infrastructure.audio.recorder import AudioRecorder
-from settings import AUDIO_SAMPLE_RATE, MEETING_DATE_FORMAT, OUTPUT_DIR
+from settings import (
+    AUDIO_SAMPLE_RATE,
+    MEETING_DATE_FORMAT,
+    OUTPUT_DIR,
+    to_project_path,
+)
 
 console = Console()
 
@@ -57,7 +62,10 @@ class RecordMeetingUseCase:
         self._recorder.save_wav(full_audio, wav_path)
         console.print(f"[dim]Audio salvo em {wav_path}[/dim]\n")
 
-        meeting = Meeting.create(audio_path=str(wav_path), duration_seconds=duration)
+        meeting = Meeting.create(
+            audio_path=to_project_path(wav_path),
+            duration_seconds=duration,
+        )
 
         context = ProcessingContext(
             wav_path=wav_path,
@@ -69,7 +77,9 @@ class RecordMeetingUseCase:
             meeting.transcript = context.transcript
             meeting.participants = [
                 Participant(label=speaker)
-                for speaker in dict.fromkeys(segment.speaker for segment in context.segments)
+                for speaker in dict.fromkeys(
+                    segment.speaker for segment in context.segments
+                )
             ]
         if context.business_rules:
             meeting.business_rules = context.business_rules

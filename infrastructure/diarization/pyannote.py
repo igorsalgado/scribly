@@ -20,17 +20,26 @@ def _dominant_speaker(seg_start: float, seg_end: float, diarization) -> str:
 
 class PyannoteDiarizer(DiarizationService):
     def __init__(self, hf_token: str | None = None) -> None:
-        self._pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=hf_token or None,
-        )
+        self._pipeline = self._load_pipeline(hf_token)
 
     def assign_speakers(
         self,
         segments: list[TranscriptSegment],
         wav_path: Path,
     ) -> list[TranscriptSegment]:
-        diarization = self._pipeline(str(wav_path))
+        if not segments:
+            return segments
+        if self._pipeline is None:
+            return self._fallback_single_speaker(segments)
+
+        try:
+            diarization = self._pipeline(str(wav_path))
+        except Exception as exc:
+            print(
+                "Aviso: diarizacao indisponivel, usando fallback de speaker unico. "
+                f"Detalhe: {exc}"
+            )
+            return self._fallback_single_speaker(segments)
 
         label_map: dict[str, str] = {}
         for _, _, label in diarization.itertracks(yield_label=True):
@@ -41,4 +50,37 @@ class PyannoteDiarizer(DiarizationService):
             raw_speaker = _dominant_speaker(segment.start, segment.end, diarization)
             segment.speaker = label_map.get(raw_speaker, "Desconhecido")
 
+        return segments
+
+    @staticmethod
+    def _load_pipeline(hf_token: str | None) -> Pipeline | None:
+        try:
+            pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=hf_token or None,
+            )
+        except Exception as exc:
+            print(
+                "Aviso: nao foi possivel carregar o pipeline do Pyannote. "
+                "O processamento vai seguir sem diarizacao real. "
+                f"Detalhe: {exc}"
+            )
+            return None
+
+        if pipeline is None:
+            print(
+                "Aviso: o pipeline do Pyannote nao foi carregado. "
+                "Verifique o HF_TOKEN e aceite os termos do modelo "
+                "'pyannote/speaker-diarization-3.1'."
+            )
+            return None
+
+        return pipeline
+
+    @staticmethod
+    def _fallback_single_speaker(
+        segments: list[TranscriptSegment],
+    ) -> list[TranscriptSegment]:
+        for segment in segments:
+            segment.speaker = "Participante 1"
         return segments

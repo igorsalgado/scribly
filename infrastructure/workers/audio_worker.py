@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import threading
 import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 import numpy as np
 import sounddevice as sd
@@ -14,9 +14,11 @@ from arq import create_pool
 
 from settings import (
     AUDIO_SAMPLE_RATE,
+    LIVE_CHUNKS_DIR,
     LIVE_TRANSCRIPTION_CHUNK_SECONDS,
     OUTPUT_DIR,
     REDIS_SETTINGS,
+    to_project_path,
 )
 
 
@@ -85,7 +87,7 @@ class AudioWorker:
 
             chunk_path = self._save_chunk_wav(audio)
             future = asyncio.run_coroutine_threadsafe(
-                self._enqueue_and_get(chunk_path),
+                self._enqueue_and_get(to_project_path(chunk_path)),
                 self._async_loop,
             )
             try:
@@ -95,7 +97,7 @@ class AudioWorker:
             except Exception:
                 pass
             finally:
-                Path(chunk_path).unlink(missing_ok=True)
+                chunk_path.unlink(missing_ok=True)
 
     async def _enqueue_and_get(self, wav_path: str) -> str:
         pool = await create_pool(REDIS_SETTINGS)
@@ -108,11 +110,11 @@ class AudioWorker:
         finally:
             await pool.aclose()
 
-    def _save_chunk_wav(self, audio: np.ndarray) -> str:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = tmp.name
-        _write_wav(audio, Path(tmp_path))
-        return tmp_path
+    def _save_chunk_wav(self, audio: np.ndarray) -> Path:
+        LIVE_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+        chunk_path = LIVE_CHUNKS_DIR / f"chunk_{uuid4().hex}.wav"
+        _write_wav(audio, chunk_path)
+        return chunk_path
 
     def _save_full_wav(self) -> tuple[str, float]:
         with self._lock:
@@ -137,6 +139,4 @@ def _write_wav(audio: np.ndarray, path: Path) -> None:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
         wav_file.setframerate(AUDIO_SAMPLE_RATE)
-        wav_file.writeframes(
-            (audio.flatten() * 32767).astype(np.int16).tobytes()
-        )
+        wav_file.writeframes((audio.flatten() * 32767).astype(np.int16).tobytes())

@@ -24,8 +24,8 @@ print('Whisper ${WHISPER_MODEL} ready')"
 ARG HF_TOKEN
 RUN python -c "\
 from pyannote.audio import Pipeline; \
-Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token='${HF_TOKEN}'); \
-print('Pyannote ready')"
+pipeline = Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token='${HF_TOKEN}'); \
+print('Pyannote ready' if pipeline is not None else 'Pyannote unavailable: check HF_TOKEN access and accept the gated model terms')"
 
 RUN mkdir -p /app/output /app/data
 

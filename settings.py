@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from arq.connections import RedisSettings
@@ -37,16 +37,48 @@ MEETING_DATE_FORMAT = os.getenv("MEETING_DATE_FORMAT", "%d/%m/%Y %H:%M")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", BASE_DIR / "output"))
 DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "data" / "scribly.db"))
+LIVE_CHUNKS_DIR = Path(os.getenv("LIVE_CHUNKS_DIR", BASE_DIR / "data" / "live_chunks"))
 
 if not OUTPUT_DIR.is_absolute():
     OUTPUT_DIR = BASE_DIR / OUTPUT_DIR
 if not DB_PATH.is_absolute():
     DB_PATH = BASE_DIR / DB_PATH
+if not LIVE_CHUNKS_DIR.is_absolute():
+    LIVE_CHUNKS_DIR = BASE_DIR / LIVE_CHUNKS_DIR
 
 
 def ensure_directories() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LIVE_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def to_project_path(path: str | Path) -> str:
+    raw_path = str(path)
+    if not raw_path:
+        return raw_path
+
+    path_obj = Path(raw_path)
+    if path_obj.is_absolute():
+        candidate = path_obj.resolve()
+    else:
+        candidate = (BASE_DIR / path_obj).resolve()
+
+    try:
+        relative_path = candidate.relative_to(BASE_DIR.resolve())
+    except ValueError:
+        return raw_path
+
+    return str(PurePosixPath(relative_path.as_posix()))
+
+
+def resolve_project_path(path: str | Path) -> Path:
+    path_obj = Path(str(path))
+    if path_obj.is_absolute():
+        return path_obj
+
+    normalized = Path(PurePosixPath(str(path)))
+    return (BASE_DIR / normalized).resolve()
 
 
 def create_whisper_transcriber() -> "WhisperTranscriber":
@@ -96,7 +128,7 @@ async def transcribe_chunk(ctx: dict, wav_path: str) -> str:
     whisper = ctx["whisper"]
 
     def _transcribe() -> str:
-        return whisper.transcribe_quick(Path(wav_path))
+        return whisper.transcribe_quick(resolve_project_path(wav_path))
 
     return await loop.run_in_executor(None, _transcribe)
 
@@ -104,6 +136,7 @@ async def transcribe_chunk(ctx: dict, wav_path: str) -> str:
 async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
     from datetime import datetime
 
+    from application.meeting_markdown import write_meeting_markdown
     from application.pipeline import ProcessingContext
     from domain.meeting import Meeting, Participant
 
@@ -119,8 +152,9 @@ async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
         asyncio.run_coroutine_threadsafe(_publish(stage), loop)
 
     def _run_pipeline() -> "ProcessingContext":
+        resolved_wav_path = resolve_project_path(wav_path)
         context = ProcessingContext(
-            wav_path=Path(wav_path),
+            wav_path=resolved_wav_path,
             date=datetime.now().strftime(MEETING_DATE_FORMAT),
             on_progress=_on_progress,
         )
@@ -129,7 +163,10 @@ async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
 
     context: "ProcessingContext" = await loop.run_in_executor(None, _run_pipeline)
 
-    meeting = Meeting.create(audio_path=wav_path, duration_seconds=duration)
+    meeting = Meeting.create(
+        audio_path=to_project_path(wav_path),
+        duration_seconds=duration,
+    )
     meeting.transcript = context.transcript
     meeting.business_rules = context.business_rules
 
@@ -141,6 +178,7 @@ async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
         meeting.participants = [Participant(label=label) for label in seen]
 
     repository.save(meeting)
+    write_meeting_markdown(meeting)
     await redis.publish(REDIS_PROGRESS_CHANNEL, "done")
     return str(meeting.id)
 
