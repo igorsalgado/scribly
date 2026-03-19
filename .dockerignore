@@ -1,0 +1,10 @@
+.env
+.venv/
+.git/
+__pycache__/
+*.py[cod]
+output/
+scribly.db
+*.wav
+*.md
+!README.md

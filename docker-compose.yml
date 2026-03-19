@@ -1,12 +1,42 @@
 services:
+  scribly:
+    build:
+      context: .
+      args:
+        HF_TOKEN: ${HF_TOKEN}
+        WHISPER_MODEL: ${WHISPER_MODEL:-medium}
+    image: scribly:latest
+    container_name: scribly
+    env_file: .env
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      # Windows/Mac audio via PulseAudio TCP:
+      # 1. Install PulseAudio and start it with TCP module
+      # 2. Set PULSE_SERVER=tcp:host.docker.internal:4713 in .env
+      PULSE_SERVER: ${PULSE_SERVER:-}
+    volumes:
+      - ./output:/app/output
+      - scribly_db:/app/scribly.db
+    stdin_open: true
+    tty: true
+    depends_on:
+      ollama:
+        condition: service_healthy
+
   ollama:
     image: ollama/ollama
-    container_name: soundcatch-ollama
+    container_name: scribly-ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   ollama_data:
+  scribly_db:

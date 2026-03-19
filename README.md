@@ -32,94 +32,103 @@ Markdown + SQLite
 
 ## Pré-requisitos
 
-- Python 3.11+
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) instalado e rodando
+- `make` instalado (`choco install make` no Windows, nativo no Linux/Mac)
 - Conta no [HuggingFace](https://huggingface.co) com token de acesso
 
 ## Setup
 
-### 1. Instalar dependências
-
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-### 2. Configurar variáveis de ambiente
+### 1. Configurar variáveis de ambiente
 
 ```bash
 cp .env.example .env
 ```
 
-Edite `.env` e preencha o `HF_TOKEN`:
+Edite `.env`:
 
 ```env
 HF_TOKEN=hf_...
 WHISPER_MODEL=medium
 OLLAMA_MODEL=mistral
-OLLAMA_URL=http://localhost:11434
 ```
 
-### 3. Obter o HuggingFace Token
+### 2. Obter o HuggingFace Token
 
 1. Crie uma conta em [huggingface.co](https://huggingface.co)
 2. Gere um token em [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
-3. Aceite os termos dos modelos de diarização:
+3. Aceite os termos:
    - [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
    - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
 
-### 4. Subir Ollama e baixar os modelos
+### 3. Build da imagem
 
 ```bash
-# Subir Ollama via Docker
-docker compose up -d
-
-# Baixar todos os modelos (Whisper + Pyannote + Ollama)
-# Apenas necessário na primeira execução (~5GB total)
-python download_models.py
+make build
 ```
 
-**Modelos baixados:**
-| Modelo | Tamanho | Descrição |
-|--------|---------|-----------|
-| Whisper `small` | ~500 MB | Transcrição de áudio em PT-BR |
+Todos os modelos são baixados e embutidos na imagem durante o build (~5-15 min, imagem final ~6GB). Após isso, **zero dependências externas** — tudo roda offline dentro do container.
+
+**Modelos embutidos na imagem:**
+| Modelo | Tamanho | Função |
+|--------|---------|--------|
+| Whisper `medium` | ~1.5 GB | Transcrição de áudio em PT-BR |
 | Pyannote diarization 3.1 | ~200 MB | Identificação de speakers |
-| Mistral 7B | ~4 GB | Extração de regras de negócio |
+| Mistral 7B (Ollama) | ~4 GB | Extração de regras de negócio |
+
+### 4. Pull do modelo Ollama
+
+```bash
+make pull-model
+```
 
 ## Uso
 
 ```bash
-python main.py
+make run      # grava nova reunião
 ```
 
 1. Selecione o dispositivo de entrada de áudio
-2. A transcrição aparece em tempo real no terminal
-3. Pressione `Ctrl+C` para encerrar a reunião
-4. O Scribly processa o áudio completo, identifica os speakers e extrai as regras de negócio
-5. O relatório é salvo em `output/reuniao_YYYYMMDD_HHMMSS.md`
-
-### Capturar áudio do sistema (Teams / Meet / Zoom)
-
-No Windows, ative o **Stereo Mix**:
-
-> Painel de Controle → Som → Gravação → clique direito → **Mostrar dispositivos desabilitados** → ativar **Stereo Mix**
-
-Selecione esse dispositivo ao iniciar o Scribly.
+2. Transcrição aparece em tempo real no terminal
+3. `Ctrl+C` encerra a reunião e dispara o processamento completo
+4. Relatório salvo em `output/reuniao_YYYYMMDD_HHMMSS.md`
 
 ### Reprocessar um áudio existente
 
-```python
-from pathlib import Path
-from application.reprocess_meeting import ReprocessMeetingUseCase
-
-use_case = ReprocessMeetingUseCase(pipeline=pipeline, repository=repository)
-meeting = use_case.execute(wav_path=Path("output/reuniao_20260318_143000.wav"))
+```bash
+make process FILE=output/reuniao_20260318_143000.wav
 ```
+
+### Todos os comandos
+
+```bash
+make help
+```
+
+```
+  build           Build image with all models baked in — required once (5-15 min, ~6GB)
+  run             Record a new meeting — Ctrl+C stops recording and starts processing
+  process         Reprocess an existing WAV  →  make process FILE=output/recording.wav
+  pull-model      Pull Ollama LLM model (default: mistral)  →  make pull-model MODEL=llama3.2:3b
+  up              Start Ollama service in background
+  down            Stop all services
+  logs            Follow container logs
+  clean           Remove containers, volumes and local image
+```
+
+## Áudio em Docker — por plataforma
+
+| Plataforma | Suporte | Como habilitar |
+|---|---|---|
+| **Linux** | ✅ Nativo | Automático via Makefile (`/dev/snd` passthrough) |
+| **Windows 11 WSL2** | ✅ Nativo | Execute os comandos `make` dentro do terminal WSL2 |
+| **Windows nativo** | ⚠️ Via PulseAudio | Instale PulseAudio, adicione `PULSE_SERVER=tcp:host.docker.internal:4713` no `.env` |
+| **Mac** | ⚠️ Via PulseAudio | Instale BlackHole + PulseAudio, adicione `PULSE_SERVER=...` no `.env` |
+
+### Capturar áudio do sistema no Windows (Teams / Meet / Zoom)
+
+Ative o **Stereo Mix** antes de iniciar:
+
+> Painel de Controle → Som → Gravação → clique direito → **Mostrar dispositivos desabilitados** → ativar **Stereo Mix**
 
 ## Saída
 

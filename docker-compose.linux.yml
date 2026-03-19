@@ -1,0 +1,9 @@
+# Linux / WSL2 override — passes the host audio device to the container.
+# Used automatically by the Makefile on Linux.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.linux.yml run --rm scribly
+services:
+  scribly:
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
