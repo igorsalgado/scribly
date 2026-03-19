@@ -60,7 +60,7 @@ Edite `.env` e preencha o `HF_TOKEN`:
 
 ```env
 HF_TOKEN=hf_...
-WHISPER_MODEL=small
+WHISPER_MODEL=medium
 OLLAMA_MODEL=mistral
 OLLAMA_URL=http://localhost:11434
 ```
@@ -180,8 +180,8 @@ Altere `WHISPER_MODEL` no `.env`:
 |--------|---------|------------|
 | `tiny` | 75 MB | Muito rápido |
 | `base` | 150 MB | Rápido |
-| `small` | 500 MB | Equilibrado ✓ |
-| `medium` | 1.5 GB | Mais preciso |
+| `small` | 500 MB | Equilibrado |
+| `medium` | 1.5 GB | Mais preciso ✓ |
 | `large-v3` | 3 GB | Máxima precisão |
 
 ### Ollama
