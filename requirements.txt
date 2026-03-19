@@ -1,0 +1,20 @@
+# Audio capture
+sounddevice
+numpy
+
+# Transcription (offline)
+faster-whisper
+
+# Speaker diarization (offline, requires HF token for model download only)
+pyannote.audio==3.3.2
+# CPU-only torch — much smaller than the default GPU build
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchaudio==2.2.2+cpu
+
+# LLM via Ollama (offline, runs in Docker)
+httpx
+
+# Utils
+python-dotenv
+rich
