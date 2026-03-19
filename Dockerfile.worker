@@ -32,4 +32,4 @@ print('Pyannote ready')"
 
 RUN mkdir -p /app/output
 
-CMD ["python", "main.py"]
+CMD ["arq", "worker_settings.WorkerSettings"]

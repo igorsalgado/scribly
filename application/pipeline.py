@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from domain.meeting import BusinessRules, Transcript, TranscriptSegment
 from domain.services import DiarizationService, ExtractionService, TranscriptionService
@@ -13,6 +14,7 @@ class ProcessingContext:
     segments: list[TranscriptSegment] = field(default_factory=list)
     transcript: "Transcript | None" = None
     business_rules: "BusinessRules | None" = None
+    on_progress: "Callable[[str], None] | None" = None
 
 
 class ProcessingHandler(ABC):
@@ -37,6 +39,8 @@ class TranscriptionHandler(ProcessingHandler):
         self._service = service
 
     def handle(self, context: ProcessingContext) -> None:
+        if context.on_progress:
+            context.on_progress("transcribing")
         context.segments = self._service.transcribe_with_timestamps(context.wav_path)
         context.transcript = Transcript(segments=context.segments)
         self._pass_to_next(context)
@@ -48,6 +52,8 @@ class DiarizationHandler(ProcessingHandler):
         self._service = service
 
     def handle(self, context: ProcessingContext) -> None:
+        if context.on_progress:
+            context.on_progress("diarizing")
         if context.segments:
             context.segments = self._service.assign_speakers(
                 context.segments, context.wav_path
@@ -62,6 +68,8 @@ class ExtractionHandler(ProcessingHandler):
         self._service = service
 
     def handle(self, context: ProcessingContext) -> None:
+        if context.on_progress:
+            context.on_progress("extracting")
         if context.transcript:
             participants = list(
                 dict.fromkeys(seg.speaker for seg in context.segments)

@@ -1,21 +1,32 @@
 services:
-  scribly:
+  redis:
+    image: redis:7-alpine
+    container_name: scribly-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  scribly-worker:
     build:
       context: .
+      dockerfile: Dockerfile.worker
       args:
         HF_TOKEN: ${HF_TOKEN}
         WHISPER_MODEL: ${WHISPER_MODEL:-medium}
-    image: scribly:latest
-    container_name: scribly
+    image: scribly-worker:latest
+    container_name: scribly-worker
     env_file: .env
     environment:
       OLLAMA_URL: http://ollama:11434
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     volumes:
       - ./output:/app/output
       - scribly_db:/app/scribly.db
-    stdin_open: true
-    tty: true
     depends_on:
+      redis:
+        condition: service_started
       ollama:
         condition: service_healthy
 
@@ -36,3 +47,4 @@ services:
 volumes:
   ollama_data:
   scribly_db:
+  redis_data:

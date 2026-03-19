@@ -18,3 +18,10 @@ httpx
 # Utils
 python-dotenv
 rich
+
+# ARQ worker + Redis
+arq
+redis[asyncio]
+
+# UI
+customtkinter
