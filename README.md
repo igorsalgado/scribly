@@ -1,173 +1,235 @@
 # Scribly
 
-Assistente de reuniões offline para desktop. Grava o áudio, exibe transcrição ao vivo, identifica speakers automaticamente e extrai regras de negócio — tudo sem enviar dados para nenhuma API externa.
+Scribly e um assistente offline para reunioes no desktop. A interface roda na maquina do usuario, captura o audio do microfone, mostra a transcricao ao vivo e delega o processamento pesado para um worker em Docker.
 
-> TODO: screenshot da janela principal
+O pipeline atual faz:
 
----
+1. captura de audio na UI desktop
+2. transcricao rapida em lotes curtos para feedback ao vivo
+3. transcricao completa com timestamps
+4. diarizacao de speakers com Pyannote
+5. extracao de regras de negocio com Ollama
+6. persistencia em Markdown e SQLite
+
+## Como o projeto esta organizado
+
+```text
+scribly/
+|-- application/        # casos de uso e pipeline
+|-- domain/             # entidades, value objects e interfaces
+|-- infrastructure/     # audio, Whisper, Pyannote, Ollama, SQLite e workers
+|-- ui/                 # interface desktop em customtkinter
+|-- settings.py         # configuracoes centralizadas e WorkerSettings do ARQ
+|-- main.py             # entrypoint: UI por padrao, reprocessamento com --file
+|-- scribly.pyw         # launcher opcional para abrir UI sem terminal
+|-- Dockerfile          # imagem do worker
+`-- docker-compose.yml  # Redis + worker + Ollama
+```
 
 ## Requisitos
 
-| Requisito | Versão mínima |
-|---|---|
-| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | 24+ |
-| [Python](https://www.python.org/downloads/) | 3.11+ |
-| [Make](https://gnuwin32.sourceforge.net/packages/make.htm) (Windows) | qualquer |
-| Conta no [Hugging Face](https://huggingface.co) | — |
+- Docker Desktop
+- Python 3.11 ou superior
+- `make`
+- token do Hugging Face para o build da imagem
 
-> O build da imagem Docker baixa os modelos Whisper e Pyannote e os deixa embutidos (~6 GB). Após o build, o projeto funciona completamente offline.
+## Dependencias do host
 
----
-
-## Configuração
-
-### 1. Obter token do Hugging Face
-
-1. Acesse [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) e crie um token com permissão de leitura.
-2. Aceite os termos de uso dos modelos:
-   - [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-   - [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
-
-### 2. Criar o `.env`
-
-```bash
-cp .env.example .env
-```
-
-Preencha o `.env` com suas configurações:
-
-```env
-# Obrigatório — necessário apenas no build da imagem
-HF_TOKEN=hf_...
-
-# Modelo Whisper: tiny | base | small | medium | large-v3
-WHISPER_MODEL=medium
-
-# Modelo Ollama para extração de regras de negócio
-OLLAMA_MODEL=mistral
-```
-
-As demais variáveis já têm valores padrão e não precisam ser alteradas.
-
----
-
-## Instalação
-
-### 1. Instalar dependências Python
+A UI roda fora do container, entao as dependencias Python precisam estar instaladas na maquina host:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Build da imagem Docker
+## Configuracao
 
-> Necessário apenas uma vez. Demora entre 5 e 15 minutos dependendo da conexão.
+Copie o arquivo de exemplo:
+
+```bash
+cp .env.example .env
+```
+
+Preencha pelo menos:
+
+```env
+HF_TOKEN=hf_...
+WHISPER_MODEL=medium
+OLLAMA_MODEL=mistral
+```
+
+Outras variaveis uteis:
+
+```env
+OUTPUT_DIR=output
+DB_PATH=data/scribly.db
+REDIS_HOST=localhost
+REDIS_PORT=6379
+AUDIO_SAMPLE_RATE=16000
+LIVE_TRANSCRIPTION_CHUNK_SECONDS=5
+```
+
+## Primeiro setup
+
+### 1. Liberar acesso aos modelos do Pyannote
+
+No Hugging Face:
+
+- crie um token com permissao de leitura
+- aceite os termos de uso de:
+  - `pyannote/speaker-diarization-3.1`
+  - `pyannote/segmentation-3.0`
+
+### 2. Build da imagem do worker
+
+Esse passo baixa Whisper e Pyannote e deixa tudo embutido na imagem:
 
 ```bash
 make build
 ```
 
-Este comando baixa e embute os modelos Whisper e Pyannote na imagem. Após isso, o projeto não precisa mais de internet.
+### 3. Subir os servicos
 
-### 3. Baixar o modelo LLM no Ollama
+```bash
+make up
+```
+
+Isso sobe:
+
+- Redis
+- worker ARQ
+- Ollama
+
+### 4. Baixar o modelo do Ollama
 
 ```bash
 make pull-model
 ```
 
-Para usar um modelo diferente do padrão:
+Para usar outro modelo:
 
 ```bash
 make pull-model MODEL=llama3.2:3b
 ```
 
-> TODO: screenshot do terminal durante o build
+Depois disso, o fluxo normal pode rodar offline, desde que os modelos ja tenham sido baixados.
 
----
+## Fluxo principal
 
-## Utilização
-
-### Iniciar
+Para abrir a interface principal:
 
 ```bash
 make run
 ```
 
-Sobe os serviços Docker (Redis, Worker, Ollama) e abre a interface desktop.
+`make run` sobe os servicos se necessario e executa `python main.py`, que abre a UI.
 
-> TODO: screenshot da interface com estados IDLE / RECORDING / PROCESSING / DONE
+### Controles da UI
 
-### Atalho no Desktop (opcional)
+- `Iniciar`: comeca uma nova gravacao
+- `Ignorar`: descarta o ultimo trecho capturado
+- `Mudo`: pausa a captura sem encerrar a sessao
+- `Encerrar`: finaliza a gravacao e dispara o pipeline completo
 
-Dê duplo clique em `scribly.pyw` ou crie um atalho para ele no Desktop. Ao abrir, os containers Docker são iniciados automaticamente se não estiverem rodando.
+### Estados visiveis na interface
 
-> Requer que o **Docker Desktop esteja aberto** antes de clicar no atalho.
+- `IDLE`
+- `RECORDING`
+- `PROCESSING`
+- `DONE`
 
-### Fluxo de uso
+Durante a gravacao:
 
-1. Clique em **Iniciar** para começar a gravar a reunião
-2. A transcrição ao vivo aparece na caixa de texto conforme você fala
-3. Use **Mudo** para pausar a captura do microfone sem interromper a gravação
-4. Use **Ignorar** para descartar o último trecho gravado
-5. Clique em **Encerrar** para finalizar — o pipeline completo é disparado automaticamente
-6. Quando o indicador ficar verde e o status mostrar **Concluído**, a reunião foi processada
+- o indicador fica vermelho piscando
+- o cronometro avanca em tempo real
+- a transcricao ao vivo aparece na caixa de texto
 
-> TODO: gif demonstrando o fluxo completo de gravação
+Quando o processamento termina:
 
-### Reprocessar um arquivo WAV existente
+- o status muda para `Concluido`
+- o indicador fica verde
+- a reuniao pode ser reiniciada pela propria UI
+
+## Launcher sem terminal
+
+Em ambientes Windows, voce pode abrir `scribly.pyw` para iniciar a UI sem janela de terminal.
+
+Esse launcher:
+
+- executa `docker compose up -d`
+- adiciona a raiz do projeto ao `sys.path`
+- abre `ui.app`
+
+Observacao: o Docker Desktop precisa estar aberto.
+
+## Reprocessar um WAV existente
+
+Se voce ja tiver um arquivo `.wav`, pode reprocessar sem abrir a UI:
 
 ```bash
 make process FILE=output/reuniao_20260318_143000.wav
 ```
 
----
-
-## Resultados
-
-Após o processamento, dois arquivos são gerados em `output/`:
-
-- `reuniao_YYYYMMDD_HHmmss.wav` — áudio completo da reunião
-- `reuniao_YYYYMMDD_HHmmss.md` — transcrição diarizada + regras de negócio extraídas
-
-O banco SQLite em `data/scribly.db` armazena todos os dados estruturados para consulta posterior.
-
-> TODO: exemplo de arquivo .md gerado
-
----
-
-## Comandos disponíveis
+Ou diretamente:
 
 ```bash
-make build                              # Build da imagem com modelos embutidos
-make run                                # Sobe serviços + abre a UI
-make up                                 # Sobe apenas os serviços Docker
-make down                               # Para todos os serviços
-make logs                               # Acompanha logs dos containers
-make process FILE=output/arquivo.wav    # Reprocessa um WAV existente
-make pull-model MODEL=mistral           # Baixa modelo Ollama
-make clean                              # Remove containers, volumes e imagem
+python main.py --file output/reuniao_20260318_143000.wav
 ```
 
----
+## Saidas geradas
 
-## Arquitetura
+Arquivos produzidos em `output/`:
 
-```text
-scribly/
-├── domain/             # Agregados, Value Objects e interfaces (DDD)
-├── application/        # Casos de uso e pipeline Chain of Responsibility
-├── infrastructure/     # Whisper, Pyannote, Ollama, SQLite, workers de áudio
-├── ui/                 # Interface desktop customtkinter
-├── settings.py         # Configurações centralizadas, factories e WorkerSettings ARQ
-├── main.py             # Entrypoint: sem args → UI | --file WAV → reprocessa
-├── scribly.pyw         # Atalho desktop (inicia Docker + abre UI sem terminal)
-├── Dockerfile          # Imagem do worker com modelos embutidos
-└── docker-compose.yml  # Redis + Worker + Ollama
+- `reuniao_YYYYMMDD_HHMMSS.wav`: audio completo
+- `reuniao_YYYYMMDD_HHMMSS.md`: transcript diarizado + regras de negocio extraidas
+
+Banco local:
+
+- `data/scribly.db`
+
+O SQLite guarda:
+
+- reunioes
+- participantes
+- segmentos da transcricao
+- markdown de regras de negocio
+
+## Comandos principais
+
+```bash
+make build
+make run
+make up
+make down
+make logs
+make process FILE=output/arquivo.wav
+make pull-model
+make clean
 ```
 
-**Design patterns utilizados:**
-- **Chain of Responsibility** — pipeline de processamento (Transcrição → Diarização → Extração)
-- **Strategy** — interfaces `TranscriptionService`, `DiarizationService`, `ExtractionService`
-- **Repository** — `SQLiteMeetingRepository`
-- **Factory Method** — `create_pipeline()` em `settings.py`
-- **Producer-Consumer** — `AudioWorker` (Thread) → fila ARQ/Redis → worker Docker
+## Arquitetura resumida
+
+### UI host
+
+- `ui/app.py` controla estados da interface
+- `infrastructure/workers/audio_worker.py` captura audio localmente
+- a UI envia jobs para o worker via Redis
+
+### Worker em Docker
+
+- `settings.WorkerSettings` registra `transcribe_chunk` e `process_meeting`
+- `WhisperTranscriber` faz transcricao rapida e completa
+- `PyannoteDiarizer` identifica speakers
+- `OllamaExtractor` gera o markdown final
+
+### Persistencia
+
+- `SQLiteMeetingRepository` grava tudo em `data/scribly.db`
+- o Markdown final tambem e salvo em `output/`
+
+## Padroes usados no codigo
+
+- `Chain of Responsibility`: pipeline de transcricao, diarizacao e extracao
+- `Strategy`: interfaces para transcricao, diarizacao e extracao
+- `Repository`: persistencia desacoplada do dominio
+- `Factory Method`: criacao centralizada em `settings.py`
+- `Producer-Consumer`: UI captura audio e o worker consome jobs via ARQ/Redis
