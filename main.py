@@ -7,9 +7,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-load_dotenv()
-
-from application.pipeline import DiarizationHandler, ExtractionHandler, TranscriptionHandler
+from application.pipeline import (
+    DiarizationHandler,
+    ExtractionHandler,
+    TranscriptionHandler,
+)
 from application.record_meeting import RecordMeetingUseCase
 from application.reprocess_meeting import ReprocessMeetingUseCase
 from infrastructure.audio.recorder import AudioRecorder, list_input_devices
@@ -17,6 +19,9 @@ from infrastructure.diarization.pyannote import PyannoteDiarizer
 from infrastructure.extraction.ollama import OllamaExtractor
 from infrastructure.persistence.sqlite_repository import SQLiteMeetingRepository
 from infrastructure.transcription.whisper import WhisperTranscriber
+
+load_dotenv()
+
 
 console = Console()
 
@@ -49,17 +54,21 @@ def select_device() -> "int | None":
 
 def _show_results(meeting) -> None:
     if meeting.transcript:
-        console.print(Panel(
-            meeting.transcript.diarized_text,
-            title="[bold]Transcript Diarizado[/bold]",
-            border_style="dim",
-        ))
+        console.print(
+            Panel(
+                meeting.transcript.diarized_text,
+                title="[bold]Transcript Diarizado[/bold]",
+                border_style="dim",
+            )
+        )
     if meeting.business_rules:
-        console.print(Panel(
-            meeting.business_rules.raw_markdown,
-            title="[bold green]Regras de Negócio[/bold green]",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                meeting.business_rules.raw_markdown,
+                title="[bold green]Regras de Negócio[/bold green]",
+                border_style="green",
+            )
+        )
 
     ts = meeting.date.strftime("%Y%m%d_%H%M%S")
     output_dir = Path("output")
@@ -75,14 +84,23 @@ def _show_results(meeting) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scribly — meeting transcription & business rules extraction")
-    parser.add_argument("--file", type=Path, default=None, help="Reprocess an existing WAV file instead of recording")
+    parser = argparse.ArgumentParser(
+        description="Scribly — meeting transcription & business rules extraction"
+    )
+    parser.add_argument(
+        "--file",
+        type=Path,
+        default=None,
+        help="Reprocess an existing WAV file instead of recording",
+    )
     args = parser.parse_args()
 
-    console.print(Panel.fit(
-        "[bold green]Scribly[/bold green]\n"
-        "[dim]Whisper + Pyannote + Ollama — 100% offline[/dim]"
-    ))
+    console.print(
+        Panel.fit(
+            "[bold green]Scribly[/bold green]\n"
+            "[dim]Whisper + Pyannote + Ollama — 100% offline[/dim]"
+        )
+    )
 
     hf_token = os.getenv("HF_TOKEN", "")
     if not hf_token:
@@ -102,7 +120,9 @@ def main() -> None:
     else:
         recorder = AudioRecorder(transcription_service=whisper)
         device = select_device()
-        use_case = RecordMeetingUseCase(recorder=recorder, pipeline=pipeline, repository=repository)
+        use_case = RecordMeetingUseCase(
+            recorder=recorder, pipeline=pipeline, repository=repository
+        )
         meeting = use_case.execute(device=device)
 
     _show_results(meeting)

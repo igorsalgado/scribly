@@ -2,7 +2,7 @@ import httpx
 
 from domain.meeting import BusinessRules
 from domain.services import ExtractionService
-from prompts import (
+from infrastructure.extraction.prompts import (
     BUSINESS_RULES_OUTPUT_TEMPLATE,
     EXTRACTION_SYSTEM_PROMPT,
     EXTRACTION_USER_TEMPLATE,

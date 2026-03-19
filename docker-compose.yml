@@ -10,10 +10,6 @@ services:
     env_file: .env
     environment:
       OLLAMA_URL: http://ollama:11434
-      # Windows/Mac audio via PulseAudio TCP:
-      # 1. Install PulseAudio and start it with TCP module
-      # 2. Set PULSE_SERVER=tcp:host.docker.internal:4713 in .env
-      PULSE_SERVER: ${PULSE_SERVER:-}
     volumes:
       - ./output:/app/output
       - scribly_db:/app/scribly.db
