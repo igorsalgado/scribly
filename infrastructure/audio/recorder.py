@@ -6,9 +6,7 @@ import numpy as np
 import sounddevice as sd
 
 from domain.services import TranscriptionService
-
-SAMPLE_RATE = 16000
-LIVE_CHUNK_SEC = 5
+from settings import AUDIO_SAMPLE_RATE, LIVE_TRANSCRIPTION_CHUNK_SECONDS
 
 
 def list_input_devices() -> list[dict]:
@@ -26,8 +24,8 @@ class AudioRecorder:
 
     def record_chunk(self, device: "int | None" = None) -> np.ndarray:
         audio = sd.rec(
-            int(LIVE_CHUNK_SEC * SAMPLE_RATE),
-            samplerate=SAMPLE_RATE,
+            int(LIVE_TRANSCRIPTION_CHUNK_SECONDS * AUDIO_SAMPLE_RATE),
+            samplerate=AUDIO_SAMPLE_RATE,
             channels=1,
             dtype="float32",
             device=device,
@@ -47,5 +45,5 @@ class AudioRecorder:
         with wave.open(str(path), "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
-            wf.setframerate(SAMPLE_RATE)
+            wf.setframerate(AUDIO_SAMPLE_RATE)
             wf.writeframes((audio * 32767).astype(np.int16).tobytes())

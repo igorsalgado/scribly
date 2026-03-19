@@ -1,5 +1,4 @@
-# Linux override — passes the host audio device to the worker container.
-# Used automatically by the Makefile on Linux.
+# Linux override: expose the host audio device to the worker container.
 services:
   scribly-worker:
     devices:

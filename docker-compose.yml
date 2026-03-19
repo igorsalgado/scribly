@@ -10,7 +10,7 @@ services:
   scribly-worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker
+      dockerfile: Dockerfile
       args:
         HF_TOKEN: ${HF_TOKEN}
         WHISPER_MODEL: ${WHISPER_MODEL:-medium}
@@ -21,9 +21,11 @@ services:
       OLLAMA_URL: http://ollama:11434
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      OUTPUT_DIR: /app/output
+      DB_PATH: /app/data/scribly.db
     volumes:
       - ./output:/app/output
-      - scribly_db:/app/scribly.db
+      - ./data:/app/data
     depends_on:
       redis:
         condition: service_started
@@ -46,5 +48,4 @@ services:
 
 volumes:
   ollama_data:
-  scribly_db:
   redis_data:

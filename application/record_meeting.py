@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from datetime import datetime
-from pathlib import Path
 
 import numpy as np
 from rich.console import Console
@@ -8,6 +9,7 @@ from application.pipeline import ProcessingContext, ProcessingHandler
 from domain.meeting import Meeting, Participant
 from domain.repositories import MeetingRepository
 from infrastructure.audio.recorder import AudioRecorder
+from settings import AUDIO_SAMPLE_RATE, MEETING_DATE_FORMAT, OUTPUT_DIR
 
 console = Console()
 
@@ -40,35 +42,34 @@ class RecordMeetingUseCase:
             pass
 
         console.print(
-            "\n[bold yellow]Reunião encerrada. Processando...[/bold yellow]\n"
+            "\n[bold yellow]Reuniao encerrada. Processando...[/bold yellow]\n"
         )
 
         if not all_chunks:
-            raise ValueError("Nenhum áudio gravado.")
+            raise ValueError("Nenhum audio gravado.")
 
         full_audio = np.concatenate(all_chunks, axis=0)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        duration = len(full_audio) / 16000
-        wav_path = output_dir / f"reuniao_{ts}.wav"
+        duration = len(full_audio) / AUDIO_SAMPLE_RATE
+        wav_path = OUTPUT_DIR / f"reuniao_{timestamp}.wav"
         self._recorder.save_wav(full_audio, wav_path)
-        console.print(f"[dim]Áudio salvo em {wav_path}[/dim]\n")
+        console.print(f"[dim]Audio salvo em {wav_path}[/dim]\n")
 
         meeting = Meeting.create(audio_path=str(wav_path), duration_seconds=duration)
 
         context = ProcessingContext(
             wav_path=wav_path,
-            date=datetime.now().strftime("%d/%m/%Y %H:%M"),
+            date=datetime.now().strftime(MEETING_DATE_FORMAT),
         )
         self._pipeline.handle(context)
 
         if context.transcript:
             meeting.transcript = context.transcript
             meeting.participants = [
-                Participant(label=sp)
-                for sp in dict.fromkeys(seg.speaker for seg in context.segments)
+                Participant(label=speaker)
+                for speaker in dict.fromkeys(segment.speaker for segment in context.segments)
             ]
         if context.business_rules:
             meeting.business_rules = context.business_rules

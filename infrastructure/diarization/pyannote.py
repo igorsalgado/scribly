@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from pyannote.audio import Pipeline
@@ -17,14 +19,16 @@ def _dominant_speaker(seg_start: float, seg_end: float, diarization) -> str:
 
 
 class PyannoteDiarizer(DiarizationService):
-    def __init__(self, hf_token: str) -> None:
+    def __init__(self, hf_token: str | None = None) -> None:
         self._pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token=hf_token,
+            use_auth_token=hf_token or None,
         )
 
     def assign_speakers(
-        self, segments: list[TranscriptSegment], wav_path: Path
+        self,
+        segments: list[TranscriptSegment],
+        wav_path: Path,
     ) -> list[TranscriptSegment]:
         diarization = self._pipeline(str(wav_path))
 
@@ -33,8 +37,8 @@ class PyannoteDiarizer(DiarizationService):
             if label not in label_map:
                 label_map[label] = f"Participante {len(label_map) + 1}"
 
-        for seg in segments:
-            raw = _dominant_speaker(seg.start, seg.end, diarization)
-            seg.speaker = label_map.get(raw, "Desconhecido")
+        for segment in segments:
+            raw_speaker = _dominant_speaker(segment.start, segment.end, diarization)
+            segment.speaker = label_map.get(raw_speaker, "Desconhecido")
 
         return segments
