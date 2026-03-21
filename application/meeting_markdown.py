@@ -34,5 +34,5 @@ def write_meeting_markdown(meeting: Meeting) -> Path | None:
 
     markdown_path = get_meeting_markdown_path(meeting)
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
-    markdown_path.write_text(content, encoding="utf-8")
+    markdown_path.write_text(content, encoding="utf-8-sig")
     return markdown_path

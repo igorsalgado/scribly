@@ -5,6 +5,7 @@ from datetime import datetime
 import numpy as np
 from rich.console import Console
 
+from application.audio_policy import validate_meeting_duration
 from application.pipeline import ProcessingContext, ProcessingHandler
 from domain.meeting import Meeting, Participant
 from domain.repositories import MeetingRepository
@@ -58,6 +59,7 @@ class RecordMeetingUseCase:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         duration = len(full_audio) / AUDIO_SAMPLE_RATE
+        validate_meeting_duration(duration)
         wav_path = OUTPUT_DIR / f"reuniao_{timestamp}.wav"
         self._recorder.save_wav(full_audio, wav_path)
         console.print(f"[dim]Audio salvo em {wav_path}[/dim]\n")
