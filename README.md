@@ -44,6 +44,7 @@ pip install -r requirements.host.txt
 Observacoes:
 
 - `requirements.host.txt` cobre a UI desktop, launcher e integracao com Redis
+- `requirements.host.txt` agora tambem inclui dependencias para health checks HTTP e system tray no desktop
 - `requirements.txt` fica reservado para o worker e para ambientes Python 3.11 compativeis com a stack completa de ML
 
 ## Configuracao
@@ -71,6 +72,7 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 AUDIO_SAMPLE_RATE=16000
 LIVE_TRANSCRIPTION_CHUNK_SECONDS=5
+MIN_MEETING_DURATION_SECONDS=300
 ```
 
 ## Primeiro setup
@@ -131,10 +133,18 @@ make run
 
 ### Controles da UI
 
+- seletor de microfone: escolhe e persiste o dispositivo de entrada
 - `Iniciar`: comeca uma nova gravacao
 - `Ignorar`: descarta o ultimo trecho capturado
 - `Mudo`: pausa a captura sem encerrar a sessao
 - `Encerrar`: finaliza a gravacao e dispara o pipeline completo
+
+### Recursos extras da UI
+
+- health checks visiveis para Docker, Redis, worker ARQ e Ollama
+- banner de erro persistente com mensagem acionavel
+- aba de historico com busca, detalhe da reuniao e abertura do `.md`
+- minimizar para a bandeja do sistema ao fechar a janela
 
 ### Estados visiveis na interface
 

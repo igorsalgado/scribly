@@ -12,6 +12,7 @@ import numpy as np
 import sounddevice as sd
 from arq import create_pool
 
+from application.audio_policy import validate_meeting_duration
 from settings import (
     AUDIO_SAMPLE_RATE,
     LIVE_CHUNKS_DIR,
@@ -27,19 +28,23 @@ class AudioWorker:
         self,
         async_loop: asyncio.AbstractEventLoop,
         on_live_text: Callable[[str], None],
+        on_error: Callable[[str], None] | None = None,
     ) -> None:
         self._async_loop = async_loop
         self._on_live_text = on_live_text
+        self._on_error = on_error
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._muted = False
         self._chunks: list[np.ndarray] = []
         self._lock = threading.Lock()
+        self._last_runtime_error: str | None = None
 
     def start(self, device: int | None = None) -> None:
         self._stop_event.clear()
         self._chunks = []
+        self._last_runtime_error = None
         self._thread = threading.Thread(
             target=self._run,
             args=(device,),
@@ -53,6 +58,13 @@ class AudioWorker:
         if self._thread is not None:
             self._thread.join(timeout=LIVE_TRANSCRIPTION_CHUNK_SECONDS + 2)
         return self._save_full_wav()
+
+    def abort(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=LIVE_TRANSCRIPTION_CHUNK_SECONDS + 2)
+        with self._lock:
+            self._chunks = []
 
     def set_muted(self, muted: bool) -> None:
         self._muted = muted
@@ -93,9 +105,12 @@ class AudioWorker:
             try:
                 text = future.result(timeout=60)
                 if text:
+                    self._last_runtime_error = None
                     self._on_live_text(text)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._emit_runtime_error(
+                    f"Transcricao ao vivo indisponivel. Detalhe: {exc}"
+                )
             finally:
                 chunk_path.unlink(missing_ok=True)
 
@@ -120,22 +135,30 @@ class AudioWorker:
         with self._lock:
             chunks = list(self._chunks)
 
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        wav_path = OUTPUT_DIR / f"reuniao_{timestamp}.wav"
-
         if chunks:
             full_audio = np.concatenate(chunks, axis=0)
         else:
-            full_audio = np.zeros((AUDIO_SAMPLE_RATE,), dtype="float32")
+            full_audio = np.empty((0, 1), dtype="float32")
 
-        _write_wav(full_audio, wav_path)
         duration = len(full_audio) / AUDIO_SAMPLE_RATE
+        validate_meeting_duration(duration)
+
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        wav_path = OUTPUT_DIR / f"reuniao_{timestamp}.wav"
+        _write_wav(full_audio, wav_path)
         return str(wav_path), duration
+
+    def _emit_runtime_error(self, message: str) -> None:
+        if self._on_error is None or message == self._last_runtime_error:
+            return
+        self._last_runtime_error = message
+        self._on_error(message)
 
 
 def _write_wav(audio: np.ndarray, path: Path) -> None:
-    with wave.open(str(path), "wb") as wav_file:
+    # Usar bytes em vez de string para evitar problemas de encoding no Windows
+    with wave.open(str(path).encode("utf-8"), "wb") as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
         wav_file.setframerate(AUDIO_SAMPLE_RATE)

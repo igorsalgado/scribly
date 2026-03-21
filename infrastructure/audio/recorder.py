@@ -42,7 +42,8 @@ class AudioRecorder:
         return text
 
     def save_wav(self, audio: np.ndarray, path: Path) -> None:
-        with wave.open(str(path), "wb") as wf:
+        # Usar bytes em vez de string para evitar problemas de encoding no Windows
+        with wave.open(str(path).encode("utf-8"), "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
             wf.setframerate(AUDIO_SAMPLE_RATE)
