@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -32,12 +33,14 @@ AUDIO_SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
 LIVE_TRANSCRIPTION_CHUNK_SECONDS = int(
     os.getenv("LIVE_TRANSCRIPTION_CHUNK_SECONDS", "5")
 )
+MIN_MEETING_DURATION_SECONDS = int(os.getenv("MIN_MEETING_DURATION_SECONDS", "300"))
 MEETING_DATE_FORMAT = os.getenv("MEETING_DATE_FORMAT", "%d/%m/%Y %H:%M")
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", BASE_DIR / "output"))
 DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "data" / "scribly.db"))
 LIVE_CHUNKS_DIR = Path(os.getenv("LIVE_CHUNKS_DIR", BASE_DIR / "data" / "live_chunks"))
+APP_STATE_PATH = Path(os.getenv("APP_STATE_PATH", BASE_DIR / "data" / "ui_state.json"))
 
 if not OUTPUT_DIR.is_absolute():
     OUTPUT_DIR = BASE_DIR / OUTPUT_DIR
@@ -45,12 +48,34 @@ if not DB_PATH.is_absolute():
     DB_PATH = BASE_DIR / DB_PATH
 if not LIVE_CHUNKS_DIR.is_absolute():
     LIVE_CHUNKS_DIR = BASE_DIR / LIVE_CHUNKS_DIR
+if not APP_STATE_PATH.is_absolute():
+    APP_STATE_PATH = BASE_DIR / APP_STATE_PATH
 
 
 def ensure_directories() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     LIVE_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+    APP_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def load_app_state() -> dict:
+    ensure_directories()
+    if not APP_STATE_PATH.exists():
+        return {}
+
+    try:
+        return json.loads(APP_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_app_state(state: dict) -> None:
+    ensure_directories()
+    APP_STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def to_project_path(path: str | Path) -> str:
@@ -133,9 +158,14 @@ async def transcribe_chunk(ctx: dict, wav_path: str) -> str:
     return await loop.run_in_executor(None, _transcribe)
 
 
+async def healthcheck(ctx: dict) -> str:
+    return "ok"
+
+
 async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
     from datetime import datetime
 
+    from application.audio_policy import validate_meeting_duration
     from application.meeting_markdown import write_meeting_markdown
     from application.pipeline import ProcessingContext
     from domain.meeting import Meeting, Participant
@@ -150,6 +180,8 @@ async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
 
     def _on_progress(stage: str) -> None:
         asyncio.run_coroutine_threadsafe(_publish(stage), loop)
+
+    validate_meeting_duration(duration)
 
     def _run_pipeline() -> "ProcessingContext":
         resolved_wav_path = resolve_project_path(wav_path)
@@ -184,7 +216,7 @@ async def process_meeting(ctx: dict, wav_path: str, duration: float) -> str:
 
 
 class WorkerSettings:
-    functions = [transcribe_chunk, process_meeting]
+    functions = [transcribe_chunk, process_meeting, healthcheck]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = REDIS_SETTINGS
