@@ -6,3 +6,6 @@ rich
 arq
 redis
 customtkinter
+httpx
+pystray
+Pillow
