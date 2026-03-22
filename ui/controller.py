@@ -1,9 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import threading
 from concurrent.futures import Future
-from typing import Callable, Any
+from typing import Any, Callable
 
 from application.audio_policy import AudioTooShortError
 from application.scribly_service import ScriblyApplicationService
@@ -11,17 +11,18 @@ from application.system_health import HealthReport
 from settings import load_app_state, save_app_state
 from ui.constants import AppState
 
+
 class ScriblyController:
     def __init__(self, event_callback: Callable[[str, Any], None]) -> None:
         self._event_callback = event_callback
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_thread: threading.Thread | None = None
         self._progress_future: Future | None = None
-        
+
         self._start_async_bridge()
-        
+
         self._service = ScriblyApplicationService(self._async_loop)
-        
+
         self._closing = False
         self._health_check_running = False
         self._pending_record_after_health = False
@@ -30,7 +31,7 @@ class ScriblyController:
         self._selected_device_name = self._app_state.get("selected_input_device_name")
         self._state = AppState.IDLE
         self._muted = False
-        
+
         self._ensure_progress_subscription()
 
     def _start_async_bridge(self) -> None:
@@ -47,21 +48,23 @@ class ScriblyController:
             return
         if self._progress_future is not None and not self._progress_future.done():
             return
-            
+
         def _callback(stage: str) -> None:
             self._event_callback("progress", stage)
-            
+
         self._progress_future = asyncio.run_coroutine_threadsafe(
             self._service.subscribe_progress(_callback),
             self._async_loop,
         )
 
-    def refresh_health(self, show_failure: bool, before_recording: bool = False) -> None:
+    def refresh_health(
+        self, show_failure: bool, before_recording: bool = False
+    ) -> None:
         if self._health_check_running:
             return
         self._health_check_running = True
         self._event_callback("health_checking", (show_failure, before_recording))
-        
+
         def _run() -> None:
             report = self._service.collect_health()
             self._event_callback(
@@ -72,6 +75,7 @@ class ScriblyController:
                     "before_recording": before_recording,
                 },
             )
+
         threading.Thread(target=_run, daemon=True, name="health-check").start()
 
     def handle_health_report(self, payload: dict) -> None:
@@ -79,12 +83,12 @@ class ScriblyController:
         before_recording = bool(payload.get("before_recording"))
         self._health_report = report
         self._health_check_running = False
-        
+
         if report.ok and before_recording and self._pending_record_after_health:
             self._pending_record_after_health = False
             self.begin_recording()
             return
-        
+
         self._pending_record_after_health = False
 
     def start_recording_flow(self) -> None:
@@ -98,24 +102,24 @@ class ScriblyController:
         if self._async_loop is None:
             self._event_callback("error", "Loop async indisponivel.")
             return
-        
+
         device = self._get_selected_device_info()
         if device is None:
             self._event_callback("error", "Nenhum dispositivo de entrada disponivel.")
             return
 
         self._ensure_progress_subscription()
-        
+
         def on_live_text(text: str) -> None:
             self._event_callback("live_text", text)
-            
+
         def on_audio_error(message: str) -> None:
             self._event_callback("error", message)
-            
+
         self._service.start_recording(
             device_index=device["index"],
             on_live_text=on_live_text,
-            on_error=on_audio_error
+            on_error=on_audio_error,
         )
         self._set_state(AppState.RECORDING)
         self._event_callback("recording_started", None)
@@ -123,25 +127,25 @@ class ScriblyController:
     def stop_recording(self) -> None:
         if self._state != AppState.RECORDING:
             return
-        
+
         self._set_state(AppState.PROCESSING)
-        
+
         try:
             future = self._service.stop_recording()
-            
+
             def _on_done(f: Future[tuple[str, float]]) -> None:
                 try:
                     wav_path, duration = f.result()
                     if self._async_loop is None:
                         raise RuntimeError("Loop async indisponivel.")
-                    
+
                     asyncio.run_coroutine_threadsafe(
                         self._enqueue_process(wav_path, duration),
                         self._async_loop,
                     )
                 except Exception as exc:
                     self._event_callback("error", self._format_exception_message(exc))
-            
+
             future.add_done_callback(_on_done)
         except Exception as exc:
             self._event_callback("error", self._format_exception_message(exc))
@@ -156,13 +160,19 @@ class ScriblyController:
     def ignore_last_chunk(self) -> None:
         if self._state == AppState.RECORDING:
             self._service.ignore_last_chunk()
-            self._event_callback("message", ("Ultimo trecho de audio descartado.", "info"))
+            self._event_callback(
+                "message", ("Ultimo trecho de audio descartado.", "info")
+            )
 
     def toggle_mute(self) -> bool:
         if self._state == AppState.RECORDING:
             self._muted = not self._muted
             self._service.set_muted(self._muted)
-            msg = "Captura pausada temporariamente." if self._muted else "Captura de audio retomada."
+            msg = (
+                "Captura pausada temporariamente."
+                if self._muted
+                else "Captura de audio retomada."
+            )
             self._event_callback("message", (msg, "info"))
             return self._muted
         return False
@@ -181,7 +191,9 @@ class ScriblyController:
 
     def open_markdown(self, meeting: Any) -> None:
         if not self._service.open_meeting_markdown(meeting):
-            self._event_callback("message", ("Arquivo Markdown nao encontrado.", "warning"))
+            self._event_callback(
+                "message", ("Arquivo Markdown nao encontrado.", "warning")
+            )
 
     def list_devices(self) -> list[dict]:
         return self._service.list_devices()
@@ -219,10 +231,10 @@ class ScriblyController:
         self._closing = True
         self._pending_record_after_health = False
         self._service.shutdown()
-        
+
         if self._progress_future is not None:
             self._progress_future.cancel()
-            
+
         if self._async_loop is not None and self._async_loop.is_running():
             self._async_loop.call_soon_threadsafe(self._async_loop.stop)
         if self._async_thread is not None and self._async_thread.is_alive():

@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import os
 import subprocess
 import threading
 from concurrent.futures import Future
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 from arq import create_pool
 
@@ -24,6 +24,7 @@ from settings import (
 if TYPE_CHECKING:
     from domain.meeting import Meeting
 
+
 class ScriblyApplicationService:
     def __init__(self, async_loop: asyncio.AbstractEventLoop) -> None:
         self._async_loop = async_loop
@@ -41,10 +42,10 @@ class ScriblyApplicationService:
         return collect_health_report()
 
     def start_recording(
-        self, 
-        device_index: int, 
-        on_live_text: Callable[[str], None], 
-        on_error: Callable[[str], None]
+        self,
+        device_index: int,
+        on_live_text: Callable[[str], None],
+        on_error: Callable[[str], None],
     ) -> None:
         self._audio_worker = AudioWorker(
             async_loop=self._async_loop,
@@ -56,19 +57,19 @@ class ScriblyApplicationService:
     def stop_recording(self) -> Future[tuple[str, float]]:
         if self._audio_worker is None:
             raise RuntimeError("Nenhuma gravacao em curso.")
-        
+
         worker = self._audio_worker
         self._audio_worker = None
-        
+
         future: Future[tuple[str, float]] = Future()
-        
+
         def _finalize() -> None:
             try:
                 result = worker.stop()
                 future.set_result(result)
             except Exception as exc:
                 future.set_exception(exc)
-        
+
         threading.Thread(target=_finalize, daemon=True, name="finalize-worker").start()
         return future
 
@@ -100,9 +101,10 @@ class ScriblyApplicationService:
             await pool.aclose()
 
     async def subscribe_progress(self, callback: Callable[[str], None]) -> None:
-        import redis.asyncio as aioredis
         from contextlib import suppress
-        
+
+        import redis.asyncio as aioredis
+
         client = None
         pubsub = None
         try:
@@ -134,7 +136,7 @@ class ScriblyApplicationService:
         markdown_path = get_meeting_markdown_path(meeting)
         if not markdown_path.exists():
             return False
-        
+
         if hasattr(os, "startfile"):
             os.startfile(str(markdown_path))
         else:

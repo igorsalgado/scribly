@@ -220,6 +220,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = REDIS_SETTINGS
+    job_timeout = 3600
 
 
 ensure_directories()

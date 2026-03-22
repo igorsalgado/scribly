@@ -53,15 +53,15 @@ class AudioWorker:
             self._cleanup_temp_files()
 
             LIVE_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
-            self._temp_raw_path = LIVE_CHUNKS_DIR / f'session_{uuid4().hex}.raw'
-            self._temp_file = open(self._temp_raw_path, 'wb+')
+            self._temp_raw_path = LIVE_CHUNKS_DIR / f"session_{uuid4().hex}.raw"
+            self._temp_file = open(self._temp_raw_path, "wb+")
             self._chunk_sizes = []
 
         self._thread = threading.Thread(
             target=self._run,
             args=(device,),
             daemon=True,
-            name='audio-worker',
+            name="audio-worker",
         )
         self._thread.start()
 
@@ -119,62 +119,138 @@ class AudioWorker:
         self._chunk_sizes.append(len(data))
 
     def _run(self, device: int | None) -> None:
+        hw_extra_settings = None
+        hw_channels = 1
+        hw_samplerate = AUDIO_SAMPLE_RATE
+
+        try:
+            if device is not None:
+                dev_info = sd.query_devices(device)
+                hostapis = sd.query_hostapis()
+                wasapi_index = next(
+                    (
+                        i
+                        for i, h in enumerate(hostapis)
+                        if h["name"] == "Windows WASAPI"
+                    ),
+                    -1,
+                )
+
+                # Detecta se é dispositivo Loopback (WASAPI e sem canais de entrada nativos)
+                if (
+                    dev_info["max_input_channels"] == 0
+                    and dev_info["hostapi"] == wasapi_index
+                ):
+                    hw_extra_settings = sd.WasapiSettings(loopback=True)
+                    hw_channels = int(dev_info["max_output_channels"])
+                else:
+                    hw_channels = int(dev_info["max_input_channels"])
+
+                # Algumas placas de som não aceitam 16kHz direto.
+                try:
+                    sd.check_input_settings(
+                        device=device,
+                        channels=hw_channels,
+                        samplerate=hw_samplerate,
+                        extra_settings=hw_extra_settings,
+                    )
+                except Exception:
+                    hw_samplerate = int(dev_info["default_samplerate"])
+        except Exception as e:
+            self._emit_runtime_error(f"Erro ao configurar dispositivo: {e}")
+            return
+
         while not self._stop_event.is_set():
-            frame_count = int(LIVE_TRANSCRIPTION_CHUNK_SECONDS * AUDIO_SAMPLE_RATE)
-            audio = sd.rec(
-                frame_count,
-                samplerate=AUDIO_SAMPLE_RATE,
-                channels=1,
-                dtype='float32',
-                device=device,
-            )
-            sd.wait()
-
-            with self._lock:
-                self._append_chunk_to_temp(audio)
-
-            if self._stop_event.is_set():
-                break
-
-            if self._muted:
-                continue
-
-            chunk_path = None
             try:
-                chunk_path = self._save_chunk_wav(audio)
-                future = asyncio.run_coroutine_threadsafe(
-                    self._enqueue_and_get(to_project_path(chunk_path)),
-                    self._async_loop,
+                frame_count = int(LIVE_TRANSCRIPTION_CHUNK_SECONDS * hw_samplerate)
+                audio = sd.rec(
+                    frame_count,
+                    samplerate=hw_samplerate,
+                    channels=hw_channels,
+                    dtype="float32",
+                    device=device,
+                    extra_settings=hw_extra_settings,
                 )
-                text = future.result(timeout=60)
-                if text:
-                    self._last_runtime_error = None
-                    self._on_live_text(text)
-            except Exception as exc:
-                self._emit_runtime_error(
-                    f'Transcricao ao vivo indisponivel. Detalhe: {exc}'
-                )
-            finally:
-                if chunk_path:
-                    try:
-                        chunk_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                sd.wait()
+
+                if self._stop_event.is_set():
+                    break
+
+                # Processamento local do áudio para não alterar configurações de hardware
+                processed_audio = audio
+                
+                # Se capturamos em outra taxa, precisamos fazer o resampling para 16kHz
+                if hw_samplerate != AUDIO_SAMPLE_RATE:
+                    from scipy import signal
+
+                    # Downmix primeiro se necessário
+                    if hw_channels > 1:
+                        processed_audio = np.mean(processed_audio, axis=1, keepdims=True)
+
+                    num_samples = int(len(processed_audio) * AUDIO_SAMPLE_RATE / hw_samplerate)
+                    processed_audio = signal.resample(processed_audio, num_samples)
+                    
+                    if processed_audio.ndim == 1:
+                        processed_audio = processed_audio[:, np.newaxis]
+                else:
+                    # Downmix para mono (se não foi feito no resampling)
+                    if hw_channels > 1:
+                        processed_audio = np.mean(processed_audio, axis=1, keepdims=True)
+
+                with self._lock:
+                    self._append_chunk_to_temp(processed_audio)
+
+                if self._muted:
+                    continue
+
+                # Transcrição ao vivo (não bloqueante)
+                try:
+                    chunk_path = self._save_chunk_wav(processed_audio)
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._enqueue_and_get(to_project_path(chunk_path)),
+                        self._async_loop,
+                    )
+                    
+                    def callback(f, path=chunk_path):
+                        try:
+                            text = f.result()
+                            if text:
+                                self._last_runtime_error = None
+                                self._on_live_text(text)
+                        except Exception as exc:
+                            self._emit_runtime_error(
+                                f"Transcricao ao vivo indisponivel. Detalhe: {exc}"
+                            )
+                        finally:
+                            try:
+                                path.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+
+                    future.add_done_callback(callback)
+                    
+                except Exception as exc:
+                    self._emit_runtime_error(
+                        f"Erro ao iniciar transcricao: {exc}"
+                    )
+            except Exception as e:
+                self._emit_runtime_error(f"Erro crítico na captura: {e}")
+                break
 
     async def _enqueue_and_get(self, wav_path: str) -> str:
         pool = await create_pool(REDIS_SETTINGS)
         try:
-            job = await pool.enqueue_job('transcribe_chunk', wav_path)
+            job = await pool.enqueue_job("transcribe_chunk", wav_path)
             if job is None:
-                return ''
+                return ""
             result = await job.result(timeout=60)
-            return result or ''
+            return result or ""
         finally:
             await pool.aclose()
 
     def _save_chunk_wav(self, audio: np.ndarray) -> Path:
         LIVE_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
-        chunk_path = LIVE_CHUNKS_DIR / f'chunk_{uuid4().hex}.wav'
+        chunk_path = LIVE_CHUNKS_DIR / f"chunk_{uuid4().hex}.wav"
         _write_wav(audio, chunk_path)
         return chunk_path
 
@@ -192,7 +268,7 @@ class AudioWorker:
             self._chunk_sizes = []
 
         if not temp_path or not temp_path.exists():
-            return '', 0.0
+            return "", 0.0
 
         try:
             file_size = temp_path.stat().st_size
@@ -202,15 +278,15 @@ class AudioWorker:
             validate_meeting_duration(duration)
 
             OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            wav_path = OUTPUT_DIR / f'reuniao_{timestamp}.wav'
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            wav_path = OUTPUT_DIR / f"reuniao_{timestamp}.wav"
 
-            with wave.open(str(wav_path).encode('utf-8'), 'wb') as wav_file:
+            with wave.open(str(wav_path), "wb") as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(AUDIO_SAMPLE_RATE)
 
-                with open(temp_path, 'rb') as raw_file:
+                with open(temp_path, "rb") as raw_file:
                     while True:
                         data = raw_file.read(64 * 1024)
                         if not data:
@@ -233,8 +309,7 @@ class AudioWorker:
 
 
 def _write_wav(audio: np.ndarray, path: Path) -> None:
-    # Usar bytes em vez de string para evitar problemas de encoding no Windows
-    with wave.open(str(path).encode('utf-8'), 'wb') as wav_file:
+    with wave.open(str(path), "wb") as wav_file:
         wav_file.setnchannels(1)
         wav_file.setsampwidth(2)
         wav_file.setframerate(AUDIO_SAMPLE_RATE)
